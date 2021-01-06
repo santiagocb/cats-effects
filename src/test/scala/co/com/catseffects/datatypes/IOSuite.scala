@@ -31,7 +31,7 @@ class IOSuite extends FunSuite {
     assert(true)
   }
 
-  test("Referential transparency IO") {
+  test("IO Referential transparency") {
     val number = IO {
       println(s"Input a number: ")
       StdIn.readInt()
@@ -54,5 +54,17 @@ class IOSuite extends FunSuite {
     assert(sumProgram.unsafeRunSync())
   }
 
+  test("IO stack safety support - fibonacci serie") {
 
+    def fib(n: Int, a: Long = 0, b: Long = 1): IO[Long] = {
+      IO(a + b).flatMap { b2 =>
+        if (n > 0)
+          fib(n - 1, b, b2)
+        else
+          IO.pure(a)
+      }
+    }
+
+    assert(fib(5).unsafeRunSync() == 5)
+  }
 }
