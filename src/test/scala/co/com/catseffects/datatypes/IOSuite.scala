@@ -2,8 +2,12 @@ package co.com.catseffects.datatypes
 
 import cats.effect.IO
 import org.scalatest.FunSuite
+import cats.implicits._
+import cats.effect._
+import cats.effect.implicits._
 
 import scala.concurrent.{ExecutionContext, Future}
+import ExecutionContext.Implicits.global
 import scala.io.StdIn
 import scala.util.{Failure, Success, Try}
 
@@ -18,6 +22,9 @@ class IOSuite extends FunSuite {
    * Stack-safety (trampolining)
    * Lightweight threads
    * Dependency injection */
+
+  implicit val CS = IO.contextShift(global)
+  implicit val timer = IO.timer(global)
 
   test("IO Monad") {
     val ioa = IO { println("hey!") }
@@ -82,14 +89,13 @@ class IOSuite extends FunSuite {
   }
 
   test("Async function - convertion a future manually") {
-    def convert[A](fa: => Future[A])(implicit ec: ExecutionContext): IO[A] =
+    def convert[A](fa: => Future[A]): IO[A] =
       IO.async { cb =>
         fa.onComplete {
           case Success(a) => cb(Right(a))
           case Failure(e) => cb(Left(e))
         }
       }
-    import scala.concurrent.ExecutionContext.Implicits.global
 
     assert(convert(Future.successful(2)).unsafeRunSync() == 2)
     assert(Try(convert(Future.failed(new RuntimeException("Runtime e"))).unsafeRunSync()).isFailure)
@@ -97,4 +103,27 @@ class IOSuite extends FunSuite {
     // In this case IO Monad help us to manage side effects that onComplete method carries.
     // For that, we wrap the entire result in a Try.
   }
+
+  test("Sequencially vs concurrency") {
+    val jobOne = IO(100)
+    val jobTwo = IO("Hello world")
+
+    // Sequencially
+    val seqOne: IO[(Int, String)] = jobOne.flatMap(i => jobTwo.map(s => (i, s)))
+    val seqTwo: IO[(Int, String)] = (jobOne, jobTwo).tupled
+
+    // Concurrently (manually)
+    val conOne: IO[(Int, String)] = for {
+      j1Fiber <- jobOne.start
+      j2Fiber <- jobTwo.start
+      i <- j1Fiber.join
+      s <- j2Fiber.join
+    } yield (i, s)
+
+    // Concurrently (higher level)
+    val conTwo: IO[(Int, String)] = (jobOne, jobTwo).parTupled
+  }
+
+  //use -Ywarn-value-discard!
+
 }
