@@ -6,10 +6,13 @@ import cats.implicits._
 import cats.effect._
 import cats.effect.implicits._
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.{ExecutionContext, Future}
 import ExecutionContext.Implicits.global
+import scala.concurrent.duration.FiniteDuration
 import scala.io.StdIn
 import scala.util.{Failure, Success, Try}
+import scala.concurrent.duration._
 
 class IOSuite extends FunSuite {
 
@@ -76,7 +79,7 @@ class IOSuite extends FunSuite {
     assert(fib(5).unsafeRunSync() == 5)
   }
 
-  test("Plus two values, one already into IO monad and other using pure function") {
+  test("IO Plus two values, one already into IO monad and other using pure function") {
     val x = 2
     val y = IO.pure(x)    //eager evaluated
     val program = for {
@@ -88,7 +91,7 @@ class IOSuite extends FunSuite {
     assert(IO.unit == IO.pure(()))
   }
 
-  test("Async function - convertion a future manually") {
+  test("IO Async function - convertion a future manually") {
     def convert[A](fa: => Future[A]): IO[A] =
       IO.async { cb =>
         fa.onComplete {
@@ -104,7 +107,7 @@ class IOSuite extends FunSuite {
     // For that, we wrap the entire result in a Try.
   }
 
-  test("Sequencially vs concurrency") {
+  test("IO can run process sequencially & concurrency") {
     val jobOne = IO(100)
     val jobTwo = IO("Hello world")
 
@@ -120,10 +123,31 @@ class IOSuite extends FunSuite {
       s <- j2Fiber.join
     } yield (i, s)
 
+    // A fiber can be described as a lightweighted thread
     // Concurrently (higher level)
     val conTwo: IO[(Int, String)] = (jobOne, jobTwo).parTupled
   }
 
-  //use -Ywarn-value-discard!
+
+  test("IO can cancel a process with both methods runCancelable & unsafeRunCancelable") {
+
+    implicit val timer = IO.timer(ExecutionContext.global)
+
+    val io: IO[Unit] = IO.sleep(10.seconds) *> IO(println("Hello!"))
+    val cancelUnSafe: IO[Unit] = io.unsafeRunCancelable(r => println(s"Done unsafely: $r"))
+
+    val cancelSafe = io.runCancelable(r => IO(println(s"Done safely: $r")))
+    cancelSafe.unsafeRunSync()
+
+  }
+
+  test("IO has a mark to put an IO process uncancelable") {
+
+    implicit val timer = IO.timer(ExecutionContext.global)
+    val io: IO[Unit] = IO.sleep(10.seconds) *> IO(println("Hello!"))
+    io.uncancelable
+  }
+
+  
 
 }
