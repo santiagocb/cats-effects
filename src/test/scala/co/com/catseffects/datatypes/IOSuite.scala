@@ -1,18 +1,15 @@
 package co.com.catseffects.datatypes
 
 import cats.effect.IO
-import org.scalatest.FunSuite
 import cats.implicits._
-import cats.effect._
-import cats.effect.implicits._
+import org.scalatest.FunSuite
 
-import java.util.concurrent.ScheduledExecutorService
+import java.io.{BufferedReader, FileReader}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
-import ExecutionContext.Implicits.global
-import scala.concurrent.duration.FiniteDuration
 import scala.io.StdIn
 import scala.util.{Failure, Success, Try}
-import scala.concurrent.duration._
 
 class IOSuite extends FunSuite {
 
@@ -148,6 +145,45 @@ class IOSuite extends FunSuite {
     io.uncancelable
   }
 
-  
+  test("IO brack method to catch exceptions") {
+
+    val x = IO(new BufferedReader(new FileReader("hola.txt"))).bracket { in =>
+      IO {
+        val content = new StringBuilder()
+        var line: String = null
+        do {
+          // Synchronized access to isCanceled and to the reader
+          line = in.readLine()
+          if (line != null) content.append(line)
+        } while (line != null)
+        content.toString()
+      }
+    } { in =>
+      IO(in.close()).void
+    }
+
+    println(x.unsafeRunSync())
+  }
+
+  test("IO has a fromEither method to convert Either to IO") {
+
+    val e = Right[Throwable, Int](2)
+    val ex = Left[Throwable, Int](new IllegalArgumentException("Raising an expection"))
+
+    assert(IO.fromEither(e).unsafeRunSync() == 2)
+    Try(IO.fromEither(ex).unsafeRunSync()) match {
+      case Failure(_) => succeed
+      case _ => fail()
+    }
+  }
+
+  test("IO attempt method to catch exceptions") {
+
+    val boom: IO[Unit] = IO.raiseError(new Exception("boom"))
+    boom.attempt.map({
+      case Left(_) => succeed
+      case Right(_) => fail()
+    })
+  }
 
 }
