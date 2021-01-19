@@ -1,10 +1,12 @@
 package co.com.catseffects.datatypes
 
-import cats.effect.IO
+import cats.data.NonEmptyList
+import cats.effect.{ExitCase, IO}
 import cats.implicits._
 import org.scalatest.FunSuite
 
 import java.io.{BufferedReader, FileReader}
+import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -44,7 +46,7 @@ class IOSuite extends FunSuite {
     val number = IO {
       println(s"Input a number: ")
       StdIn.readInt()
-    }
+    } // this is not granular
 
     val sumProgram: IO[Boolean] =
       for {
@@ -184,6 +186,70 @@ class IOSuite extends FunSuite {
       case Left(_) => succeed
       case Right(_) => fail()
     })
+  }
+
+  test("IO allows us to change execution context pool") {
+    val cachedThreadPool = Executors.newCachedThreadPool()
+    val BlockingFileIO   = ExecutionContext.fromExecutor(cachedThreadPool)
+    implicit val Main = ExecutionContext.global
+
+    val ioa: IO[Unit] =
+      for {
+        _     <- IO(println("Enter your name: "))
+        _     <- IO.shift(BlockingFileIO)
+        name  <- IO(scala.io.StdIn.readLine())
+        _     <- IO.shift(Main)
+        _     <- IO(println(s"Welcome $name!"))
+        _     <- IO(cachedThreadPool.shutdown())
+      } yield ()
+
+    ioa.unsafeRunSync()
+  }
+
+  test("IO has parMapN method which allows us to execute multiple tasks parallel") {
+
+    val ioA = IO(println("Running ioA"))
+    val ioB = IO(println("Running ioB"))
+    val ioC = IO(println("Running ioC"))
+
+    val program = (ioA, ioB, ioC).parMapN { (x, y, z) => () }
+
+    program.unsafeRunSync()
+    ()
+  }
+
+  test("IO if any parallel tasks completes with a failure, the other ones get cancelled") {
+    val a = IO.raiseError[Unit](new Exception("boom")) <* IO(println("Running ioA"))
+
+    val b = (IO.sleep(10.second) *> IO(println("Running ioB")))
+      .guaranteeCase {
+        case ExitCase.Canceled => IO(println("ioB was canceled!"))
+        case _ => IO.unit
+      }
+
+    val parFailure = (a, b).parMapN { (_, _) => () }
+
+    parFailure.attempt.unsafeRunSync()
+    ()
+  }
+
+  test("IO parSequence method allows us to convert List[IO] to IO[List] and execute those tasks parallel") {
+    val anIO = IO(1)
+
+    val aLotOfIOs =
+      List(anIO, anIO)
+
+    val ioOfList: IO[List[Int]] = aLotOfIOs.parSequence
+
+    ioOfList.unsafeRunSync()
+  }
+
+  test("IO parTraverse allows us to map every list member into IO and sequence the result (execution in parallel)") {
+    val results: IO[NonEmptyList[Int]] = NonEmptyList.of(1, 2, 3).parTraverse { i =>
+      IO(i)
+    }
+
+    results.unsafeRunSync()
   }
 
 }
